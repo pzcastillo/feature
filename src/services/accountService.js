@@ -62,7 +62,7 @@ async function createAccount(comp_code, {
     status
   };
 
-  const result = await db.tInsert(
+  const result = await db.tInsertWithTenant(
     'accounts',
     data,
     comp_code,
@@ -141,7 +141,9 @@ async function getAccountById(comp_code, id) {
 }
 
 async function getAccountByEmpId(comp_code, emp_id) {
-  return await db.getAccountByEmpId(emp_id, comp_code);
+  const q = `SELECT * FROM accounts WHERE emp_id = $1`;
+  const r = await db.tQuery(q, [emp_id], comp_code);
+  return r.rows[0] || null;
 }
 
 async function listAccounts(comp_code, { limit = 20, offset = 0, department_id, user_type_id, status, search = '' } = {}) {
@@ -155,7 +157,6 @@ async function listAccounts(comp_code, { limit = 20, offset = 0, department_id, 
   if (search) {
     where.push(`(fullname ILIKE $${idx} OR username ILIKE $${idx} OR email ILIKE $${idx} OR emp_id ILIKE $${idx})`);
     params.push(`%${search}%`);
-    idx++;
   }
 
   const whereSQL = where.length ? `WHERE ${where.join(' AND ')}` : '';
