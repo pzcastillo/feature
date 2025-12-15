@@ -4,12 +4,6 @@ const jwt = require('jsonwebtoken');
 const config = require('../config');
 
 async function login({ usernameOrEmail, password, comp_code }) {
-  if (!usernameOrEmail || !password || !comp_code) {
-    throw { status: 400, message: 'Missing credentials or company code' };
-  }
-
-  const normalizedCompCode = comp_code.trim().toUpperCase();
-
   const q = `
     SELECT 
       a.id, a.emp_id, a.fullname, a.username, a.email,
@@ -18,12 +12,11 @@ async function login({ usernameOrEmail, password, comp_code }) {
       r.role_name
     FROM accounts a
     LEFT JOIN roles r ON a.role_id = r.id
-    WHERE (a.username = $1 OR a.email = $1)
-      AND a.comp_code = $2
+    WHERE (LOWER(a.username) = LOWER($1) OR LOWER(a.email) = LOWER($1))
       AND a.status = 'active'
   `;
 
-  const result = await db.tQuery(q, [usernameOrEmail], normalizedCompCode);
+  const result = await db.tQuery(q, [usernameOrEmail], comp_code);
 
   if (result.rowCount === 0) {
     throw { status: 401, message: 'Invalid credentials or company' };
