@@ -11,7 +11,6 @@ function requirePermission(requiredPermissions) {
         return res.status(401).json({ error: 'Unauthorized - missing role' });
       }
 
-      // Fetch role permissions
       const roleResult = await db.query(
         'SELECT permissions, role_name FROM roles WHERE id = $1',
         [user.role_id]
@@ -24,10 +23,8 @@ function requirePermission(requiredPermissions) {
       const { permissions, role_name } = roleResult.rows[0];
       req.user.role_name = role_name.toUpperCase();
 
-      // SUPER_ADMIN bypass
       if (req.user.role_name === 'SUPER_ADMIN') return next();
 
-      // Block non-ADMIN from managing departments
       if (req.path.startsWith('/api/departments') || req.baseUrl.includes('/departments')) {
         if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
           if (!['ADMIN'].includes(req.user.role_name)) {
@@ -44,7 +41,6 @@ function requirePermission(requiredPermissions) {
 
       const hasPermission = (perm) => permissions.includes(perm);
 
-      // Helper: get target account (only used for account routes)
       const getTargetAccount = async () => {
         if (req.params.id) {
           return await accountService.getAccountById(comp_code, req.params.id);
