@@ -1,11 +1,12 @@
 const express = require('express');
-const { body, param, query } = require('express-validator');
 const router = express.Router();
 const controller = require('../controllers/accountController');
 const validate = require('../middleware/validate');
 const authenticate = require('../middleware/auth');
 const requirePermission = require('../middleware/permission');
 
+const { trimUpperRequired, trimRequired, trimOptional } = require('../middleware/validator');
+const { body, param, query } = require('express-validator');
 /**
  * @swagger
  * tags:
@@ -28,16 +29,19 @@ const requirePermission = require('../middleware/permission');
  *           schema:
  *             type: object
  *             required:
+ *               - comp_code
  *               - emp_id
  *               - fullname
  *               - username
  *               - email
  *               - password
  *             properties:
+ *               comp_code:
+ *                 type: string
+ *                 description: Required. Company code (auto uppercased)
  *               emp_id:
  *                 type: string
  *                 example: EMP042
- *                 description: Human-readable employee ID
  *               fullname:
  *                 type: string
  *               username:
@@ -47,13 +51,11 @@ const requirePermission = require('../middleware/permission');
  *                 format: email
  *               password:
  *                 type: string
- *                 format: password
  *                 minLength: 8
  *               department_id:
  *                 type: string
  *                 format: uuid
  *                 nullable: true
- *                 description: Optional department assignment (null = no department)
  *               role_id:
  *                 type: string
  *                 format: uuid
@@ -62,29 +64,31 @@ const requirePermission = require('../middleware/permission');
  *                 format: uuid
  *     responses:
  *       201:
- *         description: Account created successfully
+ *         description: Account created
+ *       400:
+ *         description: Bad Request
+ *       401:
+ *         description: Invalid
  *       403:
  *         description: Forbidden
+ *       409:
+ *         description: Conflict
+ *       422:
+ *         description: Validation Failed
  */
 router.post(
   '/',
-  authenticate,
-  requirePermission(['accounts:create', 'accounts:create:own-dept']),
+  authenticate,                                              
+  requirePermission(['accounts:create']),
   [
-    body('emp_id')
-      .notEmpty().withMessage('emp_id is required')
-      .isLength({ min: 3, max: 50 })
-      .matches(/^[A-Z0-9\-_]+$/i).withMessage('emp_id: only letters, numbers, hyphen, underscore'),
-    body('fullname').notEmpty(),
-    body('username').notEmpty(),
-    body('email').isEmail(),
-    body('password').isLength({ min: 8 }),
-    
-    body('department_id')
-      .optional({ nullable: true })
-      .isUUID(4)
-      .withMessage('department_id must be a valid UUID (or null)'),
-    
+    trimUpperRequired('comp_code', 'Company code is required'),
+    trimRequired('emp_id').isLength({ min: 3, max: 50 }).matches(/^[A-Z0-9\-_]+$/i),
+    trimRequired('fullname'),
+    trimRequired('username'),
+    trimRequired('email').isEmail().normalizeEmail(),
+    trimRequired('password').isLength({ min: 8 }),
+
+    body('department_id').optional({ nullable: true }).isUUID(4),
     body('role_id').optional().isUUID(4),
     body('user_type_id').optional().isUUID(4),
     validate
@@ -102,6 +106,10 @@ router.post(
  *       - bearerAuth: []
  *     parameters:
  *       - in: query
+ *         name: comp_code
+ *         schema: { type: string }
+ *         description: SUPER_ADMIN only — override tenant
+ *       - in: query
  *         name: limit
  *         schema: { type: integer, default: 20 }
  *       - in: query
@@ -110,16 +118,18 @@ router.post(
  *       - in: query
  *         name: search
  *         schema: { type: string }
- *         description: Search by fullname, username, email, or emp_id
  *     responses:
  *       200:
  *         description: List of accounts
+ *       401:
+ *         description: Invalid
  */
 router.get(
   '/',
-  authenticate,
-  requirePermission(['accounts:read', 'accounts:read_own', 'accounts:read:own-dept']),
+  authenticate,                                              // ← REQUIRED
+  requirePermission(['accounts:read']),
   [
+    query('comp_code').optional().trim().notEmpty().toUpperCase(),
     query('limit').optional().isInt({ min: 1, max: 100 }),
     query('offset').optional().isInt({ min: 0 }),
     query('search').optional().trim(),
@@ -144,43 +154,21 @@ router.get(
  *           type: string
  *           format: uuid
  *     responses:
- *       200: { description: Account found }
- *       403: { description: Forbidden }
- *       404: { description: Account not found }
+ *       201:
+ *         description: Account Found
+ *       401:
+ *         description: Invalid
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Not Found
  */
+
 router.get(
   '/:id',
-  authenticate,
+  authenticate,                                            
   requirePermission(['accounts:read', 'accounts:read_own', 'accounts:read:own-dept']),
-  [param('id').isUUID(4).withMessage('Invalid UUID'), validate],
-  controller.getAccount
-);
-
-/**
- * @swagger
- * /accounts/emp/{empId}:
- *   get:
- *     summary: Get account by employee ID (emp_id)
- *     tags: [Accounts]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: empId
- *         required: true
- *         schema:
- *           type: string
- *         example: EMP042
- *     responses:
- *       200: { description: Account found }
- *       403: { description: Forbidden }
- *       404: { description: Account not found }
- */
-router.get(
-  '/emp/:empId',
-  authenticate,
-  requirePermission(['accounts:read', 'accounts:read_own', 'accounts:read:own-dept']),
-  [param('empId').notEmpty().isLength({ min: 3, max: 50 }).matches(/^[A-Z0-9\-_]+$/i), validate],
+  [param('id').isUUID(4), validate],
   controller.getAccount
 );
 
@@ -213,71 +201,34 @@ router.get(
  *               user_type_id: { type: string, format: uuid }
  *               status: { type: string, enum: [active, disabled] }
  *     responses:
- *       200: { description: Account updated }
+ *       200:
+ *         description: Account updated
+ *       400:
+ *         description: Bad Request
+ *       401:
+ *         description: Invalid
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Not Found
+ *       409:
+ *         description: Conflict
  */
 router.put(
   '/:id',
-  authenticate,
+  authenticate,                                              // ← REQUIRED
   requirePermission(['accounts:update', 'accounts:update_own', 'accounts:update:own-dept']),
   [
     param('id').isUUID(4),
-    body('emp_id').optional().isLength({ min: 3, max: 50 }).matches(/^[A-Z0-9\-_]+$/i),
-    body('fullname').optional().notEmpty(),
-    body('username').optional().notEmpty(),
-    body('email').optional().isEmail(),
+    trimUpperRequired('comp_code', 'Company code is required'),  // ← NO .optional()
+    trimOptional('emp_id').isLength({ min: 3, max: 50 }).matches(/^[A-Z0-9\-_]+$/i),
+    trimOptional('fullname'),
+    trimOptional('username'),
+    body('email').optional().isEmail().normalizeEmail(),
     body('password').optional().isLength({ min: 8 }),
-    
-    // Allow null on update
-    body('department_id')
-      .optional({ nullable: true })
-      .isUUID(4)
-      .withMessage('department_id must be a valid UUID (or null allowed)'),
-    
+    body('department_id').optional({ nullable: true }).isUUID(4),
     body('role_id').optional().isUUID(4),
-    body('user_type_id').optional().isUUID(4),
     body('status').optional().isIn(['active', 'disabled']),
-    validate
-  ],
-  controller.updateAccount
-);
-
-/**
- * @swagger
- * /accounts/emp/{empId}:
- *   put:
- *     summary: Update account by emp_id
- *     tags: [Accounts]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: empId
- *         required: true
- *         schema: { type: string }
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               emp_id: { type: string }
- *               fullname: { type: string }
- *               username: { type: string }
- *               email: { type: string }
- *               password: { type: string }
- *               department_id: { type: string, format: uuid }
- *               role_id: { type: string, format: uuid }
- *               status: { type: string, enum: [active, disabled] }
- *     responses:
- *       200: { description: Account updated }
- */
-router.put(
-  '/emp/:empId',
-  authenticate,
-  requirePermission(['accounts:update', 'accounts:update_own', 'accounts:update:own-dept']),
-  [
-    param('empId').notEmpty().isLength({ min: 3, max: 50 }).matches(/^[A-Z0-9\-_]+$/i),
-    body('emp_id').optional().isLength({ min: 3, max: 50 }).matches(/^[A-Z0-9\-_]+$/i),
     validate
   ],
   controller.updateAccount
@@ -297,43 +248,24 @@ router.put(
  *         required: true
  *         schema: { type: string, format: uuid }
  *     responses:
- *       200: { description: Account disabled }
- *       403: { description: Forbidden }
- *       404: { description: Account not found }
+ *       200:
+ *         description: Account updated
+ *       400:
+ *         description: Bad Request
+ *       401:
+ *         description: Invalid
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Not Found
+ *       409:
+ *         description: Conflict
  */
-router.patch(
-  '/:id/disable',
-  authenticate,
-  requirePermission(['accounts:disable', 'accounts:disable:own-dept']),
-  [param('id').isUUID(4), validate],
-  controller.disableAccount
-);
-
-/**
- * @swagger
- * /accounts/emp/{empId}/disable:
- *   patch:
- *     summary: Disable account by emp_id
- *     tags: [Accounts]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: empId
- *         required: true
- *         schema: { type: string }
- *     responses:
- *       200: { description: Account disabled }
- *       403: { description: Forbidden }
- *       404: { description: Account not found }
- */
-router.patch(
-  '/emp/:empId/disable',
-  authenticate,
-  requirePermission(['accounts:disable', 'accounts:disable:own-dept']),
-  [param('empId').notEmpty().matches(/^[A-Z0-9\-_]+$/i), validate],
-  controller.disableAccount
-);
+router.patch('/:id/disable',
+  authenticate, 
+  requirePermission(['accounts:disable']), 
+  [param('id').isUUID(4), validate], 
+  controller.disableAccount);
 
 /**
  * @swagger
@@ -349,42 +281,23 @@ router.patch(
  *         required: true
  *         schema: { type: string, format: uuid }
  *     responses:
- *       204: { description: Account deleted }
- *       403: { description: Forbidden }
- *       404: { description: Account not found }
+ *       204:
+ *         description: Account deleted
+ *       400:
+ *         description: Bad Request
+ *       401:
+ *         description: Invalid
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Not Found
+ *       409:
+ *         description: Conflict
  */
-router.delete(
-  '/:id',
-  authenticate,
-  requirePermission(['accounts:delete']),
-  [param('id').isUUID(4), validate],
-  controller.deleteAccount
-);
-
-/**
- * @swagger
- * /accounts/emp/{empId}:
- *   delete:
- *     summary: Permanently delete account by emp_id
- *     tags: [Accounts]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: empId
- *         required: true
- *         schema: { type: string }
- *     responses:
- *       204: { description: Account deleted }
- *       403: { description: Forbidden }
- *       404: { description: Account not found }
- */
-router.delete(
-  '/emp/:empId',
-  authenticate,
-  requirePermission(['accounts:delete']),
-  [param('empId').notEmpty().matches(/^[A-Z0-9\-_]+$/i), validate],
-  controller.deleteAccount
-);
+router.delete('/:id', 
+  authenticate, 
+  requirePermission(['accounts:delete']), 
+  [param('id').isUUID(4), validate], 
+  controller.deleteAccount);
 
 module.exports = router;
