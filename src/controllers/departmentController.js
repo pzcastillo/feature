@@ -3,16 +3,14 @@ const db = require('../db');
 
 async function create(req, res, next) {
   try {
-    // BLOCK: Only SUPER_ADMIN or ADMIN can create departments
     if (!['SUPER_ADMIN', 'ADMIN'].includes(req.user.role_name)) {
       return res.status(403).json({ error: 'Forbidden - only SuperAdmin or Admin can create departments' });
     }
 
     let comp_code = req.user.comp_code;
 
-    // SUPER_ADMIN can override company
     if (req.user.role_name === 'SUPER_ADMIN' && req.body.comp_code) {
-      comp_code = req.body.comp_code.trim().toUpperCase();
+      comp_code = req.body.comp_code;
     }
 
     const dept = await deptService.createDepartment(comp_code, req.body);
@@ -25,7 +23,7 @@ async function create(req, res, next) {
 async function getAll(req, res, next) {
   try {
     const comp_code = req.user.role_name === 'SUPER_ADMIN' && req.query.comp_code
-      ? req.query.comp_code.trim().toUpperCase()
+      ? req.query.comp_code
       : req.user.comp_code;
 
     const depts = await deptService.getAllDepartments(comp_code);
@@ -56,7 +54,6 @@ async function getById(req, res, next) {
 
 async function update(req, res, next) {
   try {
-    // BLOCK: Only SUPER_ADMIN or ADMIN can update departments
     if (!['SUPER_ADMIN', 'ADMIN'].includes(req.user.role_name)) {
       return res.status(403).json({ error: 'Forbidden - only SuperAdmin or Admin can update departments' });
     }
@@ -80,7 +77,6 @@ async function update(req, res, next) {
 
 async function updateStatus(req, res, next) {
   try {
-    // BLOCK: Only SUPER_ADMIN or ADMIN can change status
     if (!['SUPER_ADMIN', 'ADMIN'].includes(req.user.role_name)) {
       return res.status(403).json({ error: 'Forbidden - only SuperAdmin or Admin can change department status' });
     }
@@ -104,7 +100,6 @@ async function updateStatus(req, res, next) {
 
 async function remove(req, res, next) {
   try {
-    // BLOCK: Only SUPER_ADMIN or ADMIN can delete departments
     if (!['SUPER_ADMIN', 'ADMIN'].includes(req.user.role_name)) {
       return res.status(403).json({ error: 'Forbidden - only SuperAdmin or Admin can delete departments' });
     }
