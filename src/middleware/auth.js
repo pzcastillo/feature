@@ -17,9 +17,11 @@ async function authenticate(req, res, next) {
     const userId = payload.sub;
     const tokenCompCode = payload.comp_code;
 
-    if (!userId || !tokenCompCode) {
-      return res.status(401).json({ error: 'Invalid token - missing user or company' });
+    if (!userId) {
+      return res.status(401).json({ error: 'Invalid token - missing user' });
     }
+
+    const isSuperAdmin = (payload.role_name || '').toUpperCase() === 'SUPER_ADMIN';
 
     const q = `
       SELECT 
@@ -31,14 +33,17 @@ async function authenticate(req, res, next) {
       LEFT JOIN user_types ut ON a.user_type_id = ut.id
       LEFT JOIN roles r ON a.role_id = r.id
       WHERE a.id = $1
-        AND a.comp_code = $2
         AND a.status = 'active'
     `;
 
-    const result = await db.tQuery(q, [userId], tokenCompCode);
+    const result = await db.tQuery(
+      q,
+      [userId],
+      isSuperAdmin ? null : tokenCompCode
+    );
 
     if (result.rowCount === 0) {
-      return res.status(401).json({ error: 'Invalid token - user not found, disabled, or company mismatch' });
+      return res.status(401).json({ error: 'Invalid token - user not found or inactive' });
     }
 
     const user = result.rows[0];
@@ -46,7 +51,6 @@ async function authenticate(req, res, next) {
     user.role_name = (user.role_name || 'EMPLOYEE').toUpperCase();
     user.user_type_name = (user.user_type_name || '').toUpperCase();
 
-    // Attach to request
     req.user = {
       id: user.id,
       emp_id: user.emp_id,
@@ -62,8 +66,7 @@ async function authenticate(req, res, next) {
       status: user.status
     };
 
-    req.tenant = { comp_code: user.comp_code };   // for departments & accounts need this
-    req.user.comp_code = user.comp_code;          // req.user.comp_code
+    req.tenant = { comp_code: user.comp_code };
 
     next();
   } catch (err) {
